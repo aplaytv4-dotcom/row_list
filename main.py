@@ -1,3 +1,5 @@
+import os
+import sys
 import customtkinter as ctk
 from tkinter import messagebox
 from datetime import datetime
@@ -17,6 +19,14 @@ from reports import (
 )
 
 
+def get_base_path():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+BASE_PATH = get_base_path()
+
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
@@ -29,11 +39,12 @@ class AttendanceApp:
         if processed == 0:
             messagebox.showwarning(
                 "Внимание",
-                "Сотрудники не загружены. Проверь файл employees.txt"
+                "Список сотрудников не загружен. Проверьте файл employees.txt.",
             )
 
         self.app = ctk.CTk()
-        self.app.title("Учёт присутствия 7.0")
+        self.app.title("Система учёта присутствия сотрудников")
+        self.app.minsize(1650, 760)
 
         self.today_db = datetime.now().strftime("%Y-%m-%d")
         self.today_view = datetime.now().strftime("%d.%m.%Y")
@@ -42,14 +53,15 @@ class AttendanceApp:
         self.employees = get_employees()
         self.today_data = load_today_status(self.today_db)
 
+        self.chief_name_var = ctk.StringVar(value="Васин А.В.")
         self.rows = []
 
         self.build_ui()
-        self.auto_resize_window()
+        self.center_window()
 
     def build_ui(self):
         self.app.grid_columnconfigure(0, weight=1)
-        self.app.grid_rowconfigure(1, weight=1)
+        self.app.grid_rowconfigure(2, weight=1)
 
         header_frame = ctk.CTkFrame(self.app)
         header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
@@ -58,36 +70,52 @@ class AttendanceApp:
 
         title = ctk.CTkLabel(
             header_frame,
-            text="Учёт присутствия сотрудников",
+            text="Система учёта присутствия сотрудников",
             font=("Arial", 22, "bold"),
         )
-        title.grid(row=0, column=0, sticky="w", padx=15, pady=10)
+        title.grid(row=0, column=0, sticky="w", padx=15, pady=(10, 4))
 
         date_label = ctk.CTkLabel(
             header_frame,
-            text=f"Текущая дата: {self.today_view}",
+            text=f"Дата: {self.today_view}",
             font=("Arial", 18, "bold"),
         )
-        date_label.grid(row=0, column=1, sticky="e", padx=15, pady=10)
+        date_label.grid(row=0, column=1, sticky="e", padx=15, pady=(10, 4))
+
+        chief_label = ctk.CTkLabel(
+            header_frame,
+            text="Руководитель (Ф.И.О.):",
+            font=("Arial", 14, "bold"),
+        )
+        chief_label.grid(row=1, column=0, sticky="w", padx=15, pady=(0, 10))
+
+        chief_entry = ctk.CTkEntry(
+            header_frame,
+            textvariable=self.chief_name_var,
+            width=320,
+        )
+        chief_entry.grid(row=1, column=1, sticky="e", padx=15, pady=(0, 10))
 
         self.frame = ctk.CTkFrame(self.app)
-        self.frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
 
         headers = [
             "№",
             "Подразделение",
             "Должность",
             "Звание",
-            "ФИО",
+            "Ф.И.О. сотрудника",
             "Присутствует",
-            "Причина",
-            "Комментарий",
+            "Причина отсутствия",
+            "Примечание",
         ]
 
-        column_widths = [40, 150, 150, 110, 220, 110, 180, 250]
+        column_widths = [40, 150, 150, 110, 230, 110, 210, 280]
+
+        for col, width in enumerate(column_widths):
+            self.frame.grid_columnconfigure(col, minsize=width)
 
         for col, text in enumerate(headers):
-            self.frame.grid_columnconfigure(col, minsize=column_widths[col])
             ctk.CTkLabel(
                 self.frame,
                 text=text,
@@ -98,44 +126,44 @@ class AttendanceApp:
             self.add_employee_row(index, emp)
 
         buttons = ctk.CTkFrame(self.app)
-        buttons.grid(row=2, column=0, pady=(0, 10), padx=10)
+        buttons.grid(row=3, column=0, pady=(0, 10), padx=10)
 
         ctk.CTkButton(
             buttons,
-            text="Все присутствуют",
+            text="Отметить всех",
             command=self.mark_all_present,
             width=170,
         ).pack(side="left", padx=8, pady=8)
 
         ctk.CTkButton(
             buttons,
-            text="Сохранить",
+            text="Сохранить сведения",
             command=self.save_all,
             width=170,
         ).pack(side="left", padx=8, pady=8)
 
         ctk.CTkButton(
             buttons,
-            text="Отчёт за месяц",
+            text="Месячный отчёт",
             command=self.report_month,
             width=170,
         ).pack(side="left", padx=8, pady=8)
 
         ctk.CTkButton(
             buttons,
-            text="Отчёт за квартал",
+            text="Квартальный отчёт",
             command=self.report_quarter,
             width=170,
         ).pack(side="left", padx=8, pady=8)
 
         ctk.CTkButton(
             buttons,
-            text="Отчёт за год",
+            text="Годовой отчёт",
             command=self.report_year,
             width=170,
         ).pack(side="left", padx=8, pady=8)
 
-    def auto_resize_window(self):
+    def center_window(self):
         self.app.update_idletasks()
 
         req_width = self.app.winfo_reqwidth()
@@ -144,24 +172,16 @@ class AttendanceApp:
         screen_width = self.app.winfo_screenwidth()
         screen_height = self.app.winfo_screenheight()
 
-        max_width = screen_width - 40
-        max_height = screen_height - 80
+        width = max(req_width + 80, 1650)
+        height = max(req_height + 20, 760)
 
-        final_width = min(req_width, max_width)
-        final_height = min(req_height, max_height)
+        width = min(width, screen_width - 40)
+        height = min(height, screen_height - 80)
 
-        x = max((screen_width - final_width) // 2, 0)
-        y = max((screen_height - final_height) // 2, 0)
+        x = max((screen_width - width) // 2, 0)
+        y = max((screen_height - height) // 2, 0)
 
-        self.app.geometry(f"{final_width}x{final_height}+{x}+{y}")
-
-        if req_width > max_width or req_height > max_height:
-            try:
-                self.app.state("zoomed")
-            except Exception:
-                self.app.geometry(f"{max_width}x{max_height}+0+0")
-
-        self.app.minsize(1100, 600)
+        self.app.geometry(f"{width}x{height}+{x}+{y}")
 
     def add_employee_row(self, row_number, emp):
         emp_id, department, position, rank, name = emp
@@ -185,7 +205,7 @@ class AttendanceApp:
 
         present_var = ctk.BooleanVar(value=True)
         reason_var = ctk.StringVar(value="")
-        comment_var = ctk.StringVar(value="")
+        note_var = ctk.StringVar(value="")
 
         if not is_vacant:
             saved = self.today_data.get(emp_id)
@@ -195,11 +215,10 @@ class AttendanceApp:
                 else:
                     present_var.set(False)
                     reason_var.set(saved["reason"])
-                    # комментарий подгружаем только для "Отпросился"
-                    if saved["reason"] == "Отпросился":
-                        comment_var.set(saved["comment"])
+                    if saved["reason"] == "Уважительная причина":
+                        note_var.set(saved["comment"])
                     else:
-                        comment_var.set("")
+                        note_var.set("")
 
         checkbox = ctk.CTkCheckBox(
             self.frame,
@@ -214,17 +233,17 @@ class AttendanceApp:
             values=self.reasons,
             variable=reason_var,
             state="readonly",
-            width=170,
+            width=200,
         )
-        combo.grid(row=row_number, column=6, padx=6, pady=4)
+        combo.grid(row=row_number, column=6, padx=(6, 10), pady=4, sticky="w")
 
         entry = ctk.CTkEntry(
             self.frame,
-            textvariable=comment_var,
-            width=240,
-            placeholder_text="Укажите причину, почему отпросился",
+            textvariable=note_var,
+            width=260,
+            placeholder_text="Укажите примечание",
         )
-        entry.grid(row=row_number, column=7, padx=6, pady=4)
+        entry.grid(row=row_number, column=7, padx=(10, 6), pady=4, sticky="w")
 
         row_data = {
             "emp_id": emp_id,
@@ -234,13 +253,12 @@ class AttendanceApp:
             "name": name,
             "present": present_var,
             "reason": reason_var,
-            "comment": comment_var,
+            "comment": note_var,
             "label": name_label,
             "combo": combo,
             "entry": entry,
             "checkbox": checkbox,
             "is_vacant": is_vacant,
-            "row_number": row_number,
         }
 
         checkbox.configure(command=lambda r=row_data: self.toggle_row_state(r))
@@ -267,7 +285,7 @@ class AttendanceApp:
         if is_present:
             row["reason"].set("")
             row["comment"].set("")
-            row["combo"].configure(state="disabled")
+            row["combo"].configure(state="readonly")
             row["entry"].grid_remove()
             row["entry"].configure(state="disabled", border_color="gray")
             row["label"].configure(text_color="black")
@@ -279,12 +297,23 @@ class AttendanceApp:
     def on_reason_changed(self, row):
         if row["is_vacant"]:
             return
-        self.update_comment_visibility(row)
 
-    def update_comment_visibility(self, row):
         reason = row["reason"].get().strip()
 
-        if reason == "Отпросился":
+        if reason:
+            row["present"].set(False)
+        else:
+            row["present"].set(True)
+
+        self.toggle_row_state(row)
+
+    def update_comment_visibility(self, row):
+        if row["is_vacant"]:
+            return
+
+        reason = row["reason"].get().strip()
+
+        if reason == "Уважительная причина":
             row["entry"].grid()
             row["entry"].configure(state="normal")
             self.check_comment_required(row)
@@ -298,12 +327,12 @@ class AttendanceApp:
             return
 
         reason = row["reason"].get().strip()
-        comment = row["comment"].get().strip()
+        note = row["comment"].get().strip()
 
-        if reason == "Отпросился":
+        if reason == "Уважительная причина":
             row["entry"].grid()
             row["entry"].configure(state="normal")
-            if not comment:
+            if not note:
                 row["entry"].configure(border_color="red")
             else:
                 row["entry"].configure(border_color="gray")
@@ -320,8 +349,9 @@ class AttendanceApp:
             self.toggle_row_state(row)
 
     def validate(self):
-        if not self.rows:
-            messagebox.showerror("Ошибка", "Список сотрудников пуст.")
+        chief_name = self.chief_name_var.get().strip()
+        if not chief_name:
+            messagebox.showerror("Ошибка", "Укажите Ф.И.О. руководителя.")
             return False
 
         real_rows = [row for row in self.rows if not row["is_vacant"]]
@@ -332,19 +362,19 @@ class AttendanceApp:
         for row in real_rows:
             is_present = row["present"].get()
             reason = row["reason"].get().strip()
-            comment = row["comment"].get().strip()
+            note = row["comment"].get().strip()
 
             if not is_present and not reason:
                 messagebox.showerror(
                     "Ошибка",
-                    f"Не указана причина отсутствия:\n{row['name']}",
+                    f"Не указана причина отсутствия сотрудника:\n{row['name']}",
                 )
                 return False
 
-            if not is_present and reason == "Отпросился" and not comment:
+            if not is_present and reason == "Уважительная причина" and not note:
                 messagebox.showerror(
                     "Ошибка",
-                    f"Для сотрудника {row['name']} нужно указать комментарий, если выбрано 'Отпросился'.",
+                    f"Для причины «Уважительная причина» необходимо заполнить поле «Примечание».\nСотрудник: {row['name']}",
                 )
                 row["entry"].grid()
                 row["entry"].configure(state="normal", border_color="red")
@@ -364,9 +394,9 @@ class AttendanceApp:
                 reason = ""
                 comment = ""
             else:
-                status = "Отсутствует"
+                status = "Отсутствуют по уважительной причине"
                 reason = row["reason"].get().strip()
-                comment = row["comment"].get().strip() if reason == "Отпросился" else ""
+                comment = row["comment"].get().strip() if reason == "Уважительная причина" else ""
 
             data.append(
                 {
@@ -388,6 +418,7 @@ class AttendanceApp:
             return
 
         daily_data = self.build_daily_data()
+        chief_name = self.chief_name_var.get().strip()
 
         for row in daily_data:
             save_status(
@@ -402,28 +433,37 @@ class AttendanceApp:
             generate_daily_report(
                 daily_data,
                 staff_total_with_vacancies=len(self.employees),
+                chief_name=chief_name,
             )
-            messagebox.showinfo("Готово", "Данные сохранены и ежедневный отчёт сформирован.")
+            messagebox.showinfo(
+                "Операция выполнена",
+                "Сведения сохранены. Ежедневный отчёт успешно сформирован.",
+            )
         except FileNotFoundError as e:
             messagebox.showerror("Ошибка шаблона", str(e))
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сформировать отчёт:\n{e}")
 
     def report_month(self):
+        if not self.validate():
+            return
+
         today = datetime.now()
         date_from = today.replace(day=1).strftime("%Y-%m-%d")
         date_to = today.strftime("%Y-%m-%d")
+        chief_name = self.chief_name_var.get().strip()
 
         employees, attendance_rows = get_month_employee_stats(date_from, date_to)
 
         try:
             generate_period_report(
-                title="Месячный отчет",
+                title="Месячный отчёт",
                 date_from=date_from,
                 date_to=date_to,
                 employees=employees,
                 attendance_rows=attendance_rows,
                 staff_total_with_vacancies=len(self.employees),
+                chief_name=chief_name,
             )
         except FileNotFoundError as e:
             messagebox.showerror("Ошибка шаблона", str(e))
@@ -431,21 +471,26 @@ class AttendanceApp:
             messagebox.showerror("Ошибка", f"Не удалось сформировать отчёт:\n{e}")
 
     def report_quarter(self):
+        if not self.validate():
+            return
+
         today = datetime.now()
         quarter_start_month = ((today.month - 1) // 3) * 3 + 1
         date_from = today.replace(month=quarter_start_month, day=1).strftime("%Y-%m-%d")
         date_to = today.strftime("%Y-%m-%d")
+        chief_name = self.chief_name_var.get().strip()
 
         employees, attendance_rows = get_month_employee_stats(date_from, date_to)
 
         try:
             generate_period_report(
-                title="Квартальный отчет",
+                title="Квартальный отчёт",
                 date_from=date_from,
                 date_to=date_to,
                 employees=employees,
                 attendance_rows=attendance_rows,
                 staff_total_with_vacancies=len(self.employees),
+                chief_name=chief_name,
             )
         except FileNotFoundError as e:
             messagebox.showerror("Ошибка шаблона", str(e))
@@ -453,20 +498,25 @@ class AttendanceApp:
             messagebox.showerror("Ошибка", f"Не удалось сформировать отчёт:\n{e}")
 
     def report_year(self):
+        if not self.validate():
+            return
+
         today = datetime.now()
         date_from = today.replace(month=1, day=1).strftime("%Y-%m-%d")
         date_to = today.strftime("%Y-%m-%d")
+        chief_name = self.chief_name_var.get().strip()
 
         employees, attendance_rows = get_month_employee_stats(date_from, date_to)
 
         try:
             generate_period_report(
-                title="Годовой отчет",
+                title="Годовой отчёт",
                 date_from=date_from,
                 date_to=date_to,
                 employees=employees,
                 attendance_rows=attendance_rows,
                 staff_total_with_vacancies=len(self.employees),
+                chief_name=chief_name,
             )
         except FileNotFoundError as e:
             messagebox.showerror("Ошибка шаблона", str(e))
