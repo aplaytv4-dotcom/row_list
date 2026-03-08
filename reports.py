@@ -1,247 +1,390 @@
 import os
-from collections import Counter, defaultdict
+import sys
+from collections import defaultdict
 from datetime import datetime
 
-from docxtpl import DocxTemplate, RichText
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Pt
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-DAILY_TEMPLATE = os.path.join(BASE_DIR, "daily_template.docx")
-PERIOD_TEMPLATE = os.path.join(BASE_DIR, "period_template.docx")
+FONT_NAME = "Times New Roman"
+FONT_SIZE = 14
 
 
-def _autosave_filename(prefix):
-    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    return os.path.join(BASE_DIR, f"{prefix}_{stamp}.docx")
+def get_app_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
 
 
-def _open_file(path):
-    if hasattr(os, "startfile"):
-        os.startfile(path)
+def get_reports_dir(report_date=None) -> str:
+    if report_date is None:
+        report_date = datetime.now()
+
+    app_dir = get_app_dir()
+    month_folder = report_date.strftime("%Y-%m")
+    reports_dir = os.path.join(app_dir, "отчеты", month_folder)
+    os.makedirs(reports_dir, exist_ok=True)
+    return reports_dir
 
 
-def _render_template(template_path, context, prefix):
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Не найден шаблон: {template_path}")
-
-    doc = DocxTemplate(template_path)
-    doc.render(context)
-
-    filename = _autosave_filename(prefix)
-    doc.save(filename)
-
-    _open_file(filename)
-    return filename
+def safe_filename(text: str) -> str:
+    bad = '<>:"/\\|?*'
+    for ch in bad:
+        text = text.replace(ch, "_")
+    return text
 
 
-def _format_date(date_text):
-    return datetime.strptime(date_text, "%Y-%m-%d").strftime("%d.%m.%Y")
+def open_file(filepath: str):
+    try:
+        os.startfile(filepath)
+    except Exception:
+        pass
 
 
-def human_word(n):
-    n = abs(n) % 100
-    n1 = n % 10
+def save_document(doc: Document, filename: str, report_date=None) -> str:
+    filename = safe_filename(filename)
+    reports_dir = get_reports_dir(report_date)
+    path = os.path.join(reports_dir, filename)
+    doc.save(path)
+    open_file(path)
+    return path
 
-    if 10 < n < 20:
+
+def set_run_font(run, bold=False, size=FONT_SIZE):
+    run.font.name = FONT_NAME
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), FONT_NAME)
+    run.font.size = Pt(size)
+    run.bold = bold
+
+
+def ensure_doc_style(doc: Document):
+    style = doc.styles["Normal"]
+    style.font.name = FONT_NAME
+    style._element.rPr.rFonts.set(qn("w:eastAsia"), FONT_NAME)
+    style.font.size = Pt(FONT_SIZE)
+
+
+def add_single_line(doc: Document, text="", bold=False, align=None):
+    p = doc.add_paragraph()
+    fmt = p.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    fmt.line_spacing = 1.25
+
+    if text:
+        run = p.add_run(text)
+        set_run_font(run, bold=bold)
+
+    if align is not None:
+        p.alignment = align
+
+    return p
+
+
+def add_block_lines(doc: Document, lines, bold_lines=None, align=None):
+    """
+    Все строки пишутся внутри одного абзаца через run + '\\n'
+    """
+    if bold_lines is None:
+        bold_lines = set()
+
+    p = doc.add_paragraph()
+    fmt = p.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    fmt.line_spacing = 1.25
+
+    if align is not None:
+        p.alignment = align
+
+    total = len(lines)
+    for idx, line in enumerate(lines):
+        run = p.add_run(line)
+        set_run_font(run, bold=(idx in bold_lines))
+        if idx != total - 1:
+            run.add_break()
+
+    return p
+
+
+def add_signature_block(doc: Document, chief_name: str, current_date: str):
+    add_single_line(doc, "")
+
+    p = doc.add_paragraph()
+    fmt = p.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    fmt.line_spacing = 1
+
+    left = p.add_run("Начальник отдела")
+    set_run_font(left, bold=True)
+
+    if chief_name.strip():
+        spacer = p.add_run(" " * 25)
+        set_run_font(spacer)
+        right = p.add_run(chief_name.strip())
+        set_run_font(right, bold=True)
+
+    #add_single_line(doc, "")
+    add_single_line(doc, f"Дата составления: {current_date}")
+
+
+def plural_people(n: int) -> str:
+    n = abs(int(n))
+    if 11 <= (n % 100) <= 14:
         return "человек"
-    if 1 < n1 < 5:
+    if n % 10 == 1:
+        return "человек"
+    if n % 10 in (2, 3, 4):
         return "человека"
-    if n1 == 1:
-        return "человек"
     return "человек"
 
 
-def case_word(n):
-    n = abs(n) % 100
-    n1 = n % 10
-
-    if 10 < n < 20:
+def plural_case(n: int) -> str:
+    n = abs(int(n))
+    if 11 <= (n % 100) <= 14:
         return "случаев"
-    if 1 < n1 < 5:
-        return "случая"
-    if n1 == 1:
+    if n % 10 == 1:
         return "случай"
+    if n % 10 in (2, 3, 4):
+        return "случая"
     return "случаев"
 
 
-# =====================================================
-# ЕЖЕДНЕВНЫЙ ОТЧЁТ
-# =====================================================
+def format_people(n: int) -> str:
+    return f"{n} {plural_people(n)}"
 
-def generate_daily_report(
-    rows,
-    staff_total_with_vacancies=None,
-    chief_name="Васин А.В."
-):
-    if staff_total_with_vacancies is None:
-        staff_total_with_vacancies = len(rows)
 
-    report_date = datetime.now().strftime("%d.%m.%Y")
+def format_date_ru(date_str: str) -> str:
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except Exception:
+        return date_str
 
-    present_count = sum(1 for r in rows if r["status"] == "Присутствует")
-    absent_rows = [r for r in rows if r["status"] != "Присутствует"]
 
-    absent_count = len(absent_rows)
-
-    reason_counter = Counter()
-    respect_people = []
+def build_daily_reason_groups(absent_rows, date_view: str):
+    groups = defaultdict(list)
 
     for row in absent_rows:
-        reason = row.get("reason", "").strip()
-        name = row.get("name", "")
-        comment = row.get("comment", "")
+        reason = (row.get("reason") or "").strip()
+        comment = (row.get("comment") or "").strip()
+        name = row.get("name", "").strip()
+
+        if not reason:
+            reason = "Не указано"
 
         if reason == "Уважительная причина":
-            respect_people.append(
-                f"{name} — {comment if comment else 'без уточнения'} — {report_date}"
-            )
+            line = f"{name} — {comment if comment else '-'} — {date_view}"
         else:
-            reason_counter[reason] += 1
+            line = f"{name} — {date_view}"
 
-    absent_summary_parts = []
-    for reason, count in reason_counter.items():
-        absent_summary_parts.append(f"{reason} — {count} {human_word(count)}")
+        groups[reason].append(line)
 
-    absent_summary = ", ".join(absent_summary_parts) if absent_summary_parts else "-"
+    return groups
 
-    respect_count = len(respect_people)
-    respect_word = human_word(respect_count)
 
-    respect_lines = RichText()
-
-    if respect_people:
-        for i, line in enumerate(respect_people, 1):
-            respect_lines.add(f"{i}. {line}")
-            if i < len(respect_people):
-                respect_lines.add("\n")
-
-        respect_lines.add("\n")
+def generate_daily_report(
+    daily_data,
+    staff_total_with_vacancies: int,
+    chief_name: str,
+    report_date_db: str | None = None,
+):
+    if report_date_db:
+        report_dt = datetime.strptime(report_date_db, "%Y-%m-%d")
     else:
-        respect_lines.add("-")
+        report_dt = datetime.now()
 
-    context = {
-        "report_date": report_date,
-        "staff_total_with_vacancies": staff_total_with_vacancies,
-        "staff_total_real": len(rows),
-        "present_count": present_count,
-        "present_word": human_word(present_count),
-        "absent_count": absent_count,
-        "absent_word": human_word(absent_count),
-        "absent_summary": absent_summary,
-        "respect_lines": respect_lines,
-        "respect_count": respect_count,
-        "respect_word": respect_word,
-        "chief_name": chief_name,
-        "current_date": report_date,
+    today_db = report_dt.strftime("%Y-%m-%d")
+    today_view = report_dt.strftime("%d.%m.%Y")
+
+    doc = Document()
+    ensure_doc_style(doc)
+
+    add_single_line(doc, "ОТЧЁТ", bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    add_single_line(doc, "о присутствии сотрудников", bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    add_single_line(doc, "")
+    add_single_line(doc, f"Дата: {today_view}", align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+    real_staff = len(daily_data)
+    present_rows = [row for row in daily_data if row.get("status") == "Присутствует"]
+    absent_rows = [row for row in daily_data if row.get("status") != "Присутствует"]
+
+    present_count = len(present_rows)
+    absent_count = len(absent_rows)
+
+    head_lines = [
+        "",
+        "По штату:",
+        f"С учётом вакантных должностей: {format_people(staff_total_with_vacancies)}",
+        f"Без учёта вакантных должностей: {format_people(real_staff)}",
+        "",
+        f"Присутствуют: {format_people(present_count)}",
+        f"Отсутствуют: {format_people(absent_count)}",
+    ]
+    add_block_lines(doc, head_lines, bold_lines={1, 5, 6})
+
+    reason_groups = build_daily_reason_groups(absent_rows, today_view)
+
+    preferred_order = [
+        "Уважительная причина",
+        "Больничный",
+        "Отпуск",
+        "Командировка",
+        "Дежурство",
+        "Отпросился",
+        "Не указано",
+    ]
+
+    titles = {
+        "Уважительная причина": "Отпросились по уважительной причине",
+        "Больничный": "Больничный",
+        "Отпуск": "Отпуск",
+        "Командировка": "Командировка",
+        "Дежурство": "Дежурство",
+        "Отпросился": "Отпросился",
+        "Не указано": "Причина не указана",
     }
 
-    return _render_template(
-        DAILY_TEMPLATE,
-        context,
-        "attendance_daily"
-    )
+    has_any_group = any(len(lines) > 0 for lines in reason_groups.values())
 
+    if has_any_group:
+        #add_single_line(doc, "")
+        add_single_line(doc, "Из них:")
+        used = set()
 
-# =====================================================
-# ОТЧЁТ ЗА ПЕРИОД
-# =====================================================
+        for reason in preferred_order:
+            if reason in reason_groups and reason_groups[reason]:
+                lines = reason_groups[reason]
+                block = [f"{titles.get(reason, reason)}: {format_people(len(lines))}"]
+                for i, line in enumerate(lines, start=1):
+                    block.append(f"{i}. {line}")
+                add_block_lines(doc, block)
+                used.add(reason)
+
+        for reason, lines in reason_groups.items():
+            if reason not in used and lines:
+                block = ["", f"{reason}: {format_people(len(lines))}"]
+                for i, line in enumerate(lines, start=1):
+                    block.append(f"{i}. {line}")
+                add_block_lines(doc, block)
+    else:
+        #add_single_line(doc, "")
+        add_single_line(doc, "Отсутствующие сотрудники не зафиксированы.")
+
+    add_signature_block(doc, chief_name, today_view)
+
+    filename = f"attendance_daily_{today_db}.docx"
+    return save_document(doc, filename, report_dt)
+
 
 def generate_period_report(
-    title,
-    date_from,
-    date_to,
+    title: str,
+    date_from: str,
+    date_to: str,
     employees,
     attendance_rows,
-    staff_total_with_vacancies=None,
-    chief_name="Васин А.В."
+    staff_total_with_vacancies: int,
+    chief_name: str,
 ):
-    if staff_total_with_vacancies is None:
-        staff_total_with_vacancies = len(employees)
+    now = datetime.now()
+    current_date = now.strftime("%d.%m.%Y")
+    date_from_view = format_date_ru(date_from)
+    date_to_view = format_date_ru(date_to)
 
-    current_date = datetime.now().strftime("%d.%m.%Y")
+    doc = Document()
+    ensure_doc_style(doc)
 
-    date_from_view = _format_date(date_from)
-    date_to_view = _format_date(date_to)
+    staff_total_real = len(employees)
+    emp_names = {
+        emp_id: name for emp_id, department, position, rank, name in employees
+    }
 
-    emp_names = {emp[0]: emp[4] for emp in employees}
-
-    reason_counter = Counter()
-    reason_people = defaultdict(list)
-
-    respect_people = []
+    absent_reason_counter = defaultdict(int)
+    absent_detail_lines = []
     absent_count = 0
 
-    for emp_id, date, status, reason, comment in attendance_rows:
+    for emp_id, att_date, status, reason, comment in attendance_rows:
         if status == "Присутствует":
             continue
 
         absent_count += 1
 
-        name = emp_names.get(emp_id, "")
-        date_view = _format_date(date)
-
-        reason = (reason or "").strip() or "Без причины"
+        reason = (reason or "").strip()
         comment = (comment or "").strip()
+        emp_name = emp_names.get(emp_id, "Неизвестный сотрудник")
+        date_view = format_date_ru(att_date)
+
+        if reason:
+            absent_reason_counter[reason] += 1
+        else:
+            reason = "Не указано"
+            absent_reason_counter[reason] += 1
 
         if reason == "Уважительная причина":
-            respect_people.append({
-                "name": name,
-                "comment": comment if comment else "без уточнения",
-                "date": date_view
-            })
+            detail_text = f"{emp_name} — {reason.lower()}, {comment if comment else '-'} — {date_view}"
+        elif reason == "Не указано":
+            detail_text = f"{emp_name} — причина не указана — {date_view}"
         else:
-            reason_counter[reason] += 1
-            reason_people[reason].append(f"{name} ({date_view})")
+            detail_text = f"{emp_name} — {reason.lower()} — {date_view}"
 
-    absent_reason_lines = RichText()
+        absent_detail_lines.append(detail_text)
 
-    if reason_counter:
-        items = list(reason_counter.items())
-        for idx, (reason, count) in enumerate(items, start=1):
-            people = ", ".join(reason_people[reason])
-            line = f"{reason} — {count} {human_word(count)}: {people}"
+    add_single_line(doc, title, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
 
-            absent_reason_lines.add(line)
-            if idx < len(items):
-                absent_reason_lines.add("\n")
+    main_lines = [
+        "",
+        "Отчёт за период:",
+        f"{date_from_view} — {date_to_view}",
+        "",
+        "По штату:",
+        f"С учётом вакантных должностей: {staff_total_with_vacancies} человек",
+        f"Без учёта вакантных должностей: {staff_total_real} человек",
+        "",
+        f"Отсутствовали за период: {absent_count} {plural_case(absent_count)}",
+        "Из них:",
+    ]
+    add_block_lines(doc, main_lines, bold_lines={4, 8})
+
+    preferred_order = [
+        "Уважительная причина",
+        "Больничный",
+        "Отпуск",
+        "Командировка",
+        "Дежурство",
+        "Отпросился",
+        "Не указано",
+    ]
+
+    reason_lines = []
+    used = set()
+
+    for reason_name in preferred_order:
+        if reason_name in absent_reason_counter:
+            count = absent_reason_counter[reason_name]
+            reason_lines.append(f"{reason_name.lower()}: {count} {plural_case(count)}")
+            used.add(reason_name)
+
+    for reason_name, count in absent_reason_counter.items():
+        if reason_name not in used:
+            reason_lines.append(f"{reason_name.lower()}: {count} {plural_case(count)}")
+
+    if reason_lines:
+        add_block_lines(doc, reason_lines)
     else:
-        absent_reason_lines.add("-")
+        add_single_line(doc, "- отсутствий не зафиксировано")
 
-    respect_lines = RichText()
-    respect_count = len(respect_people)
-    respect_word = human_word(respect_count)
+    add_single_line(doc, "")
 
-    if respect_people:
-        for i, item in enumerate(respect_people, 1):
-            line = f"{i}. {item['name']} — {item['comment']} — {item['date']}"
-            respect_lines.add(line)
-
-            if i < len(respect_people):
-                respect_lines.add("\n")
-
-        respect_lines.add("\n")
+    if absent_detail_lines:
+        detail_lines = [f"{i}. {line}" for i, line in enumerate(absent_detail_lines, start=1)]
+        add_block_lines(doc, detail_lines)
     else:
-        respect_lines.add("-")
+        add_single_line(doc, "Случаи отсутствия за период не зафиксированы.")
 
-    context = {
-        "report_title": title,
-        "date_from": date_from_view,
-        "date_to": date_to_view,
-        "current_date": current_date,
-        "staff_total_with_vacancies": staff_total_with_vacancies,
-        "staff_total_real": len(employees),
-        "absent_count": absent_count,
-        "absent_cases_word": case_word(absent_count),
-        "absent_reason_lines": absent_reason_lines,
-        "respect_lines": respect_lines,
-        "respect_count": respect_count,
-        "respect_word": respect_word,
-        "chief_name": chief_name,
-    }
+    add_signature_block(doc, chief_name, current_date)
 
-    return _render_template(
-        PERIOD_TEMPLATE,
-        context,
-        "attendance_period"
-    )
+    filename = f"{title.lower().replace(' ', '_')}_{date_from}_to_{date_to}.docx"
+    return save_document(doc, filename, now)

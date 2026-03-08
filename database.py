@@ -1,12 +1,20 @@
 import os
+import sys
 import sqlite3
 from typing import Dict, List, Tuple
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "attendance.db")
-EMPLOYEES_FILE = os.path.join(BASE_DIR, "employees.txt")
-REASONS_FILE = os.path.join(BASE_DIR, "reasons.txt")
+def get_app_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+APP_DIR = get_app_dir()
+
+DB_PATH = os.path.join(APP_DIR, "attendance.db")
+EMPLOYEES_FILE = os.path.join(APP_DIR, "employees.txt")
+REASONS_FILE = os.path.join(APP_DIR, "reasons.txt")
 
 
 def connect() -> sqlite3.Connection:
@@ -69,6 +77,7 @@ def read_text_lines(file_path: str) -> List[str]:
             value = line.strip()
             if value:
                 lines.append(value)
+
     return lines
 
 
@@ -81,17 +90,12 @@ def load_reasons() -> List[str]:
             "Командировка",
             "Дежурство",
             "Отпросился",
+            "Уважительная причина",
         ]
     return reasons
 
 
 def sync_employees_from_file() -> int:
-    """
-    Синхронизирует сотрудников из employees.txt в таблицу employees.
-    Порядок строк сохраняется через sort_order.
-    Старые записи attendance не удаляются.
-    Сотрудники, которых больше нет в файле, помечаются is_active = 0.
-    """
     if not os.path.exists(EMPLOYEES_FILE):
         return 0
 
@@ -103,7 +107,11 @@ def sync_employees_from_file() -> int:
 
     with open(EMPLOYEES_FILE, "r", encoding="utf-8") as f:
         for index, line in enumerate(f, start=1):
-            parts = [p.strip() for p in line.strip().split(";")]
+            raw = line.strip()
+            if not raw:
+                continue
+
+            parts = [p.strip() for p in raw.split(";")]
             if len(parts) != 4:
                 continue
 
@@ -115,7 +123,10 @@ def sync_employees_from_file() -> int:
                 """
                 SELECT id
                 FROM employees
-                WHERE department = ? AND position = ? AND rank = ? AND name = ?
+                WHERE department = ?
+                  AND position = ?
+                  AND rank = ?
+                  AND name = ?
                 """,
                 key,
             )
@@ -141,7 +152,6 @@ def sync_employees_from_file() -> int:
 
             processed += 1
 
-    # Помечаем отсутствующих в текущем файле как неактивных
     cur.execute(
         """
         SELECT id, department, position, rank, name
@@ -164,14 +174,11 @@ def sync_employees_from_file() -> int:
 
     conn.commit()
     conn.close()
+
     return processed
 
 
 def get_employees() -> List[Tuple[int, str, str, str, str]]:
-    """
-    Возвращает активных сотрудников для интерфейса.
-    Вакантные места тоже возвращаются, если они есть в employees.txt.
-    """
     conn = connect()
     cur = conn.cursor()
 
@@ -189,27 +196,6 @@ def get_employees() -> List[Tuple[int, str, str, str, str]]:
     return rows
 
 
-def get_staff_total() -> int:
-    """
-    Количество реальных активных сотрудников без вакансий.
-    """
-    conn = connect()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT COUNT(*)
-        FROM employees
-        WHERE is_active = 1
-          AND UPPER(name) NOT LIKE 'ВАКАНТ%'
-        """
-    )
-    total = cur.fetchone()[0]
-
-    conn.close()
-    return total
-
-
 def save_status(
     emp_id: int,
     date: str,
@@ -224,8 +210,7 @@ def save_status(
         """
         INSERT INTO attendance(emp_id, date, status, reason, comment)
         VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(emp_id, date)
-        DO UPDATE SET
+        ON CONFLICT(emp_id, date) DO UPDATE SET
             status = excluded.status,
             reason = excluded.reason,
             comment = excluded.comment
@@ -238,16 +223,6 @@ def save_status(
 
 
 def load_today_status(date: str) -> Dict[int, Dict[str, str]]:
-    """
-    Загружает статусы за указанный день:
-    {
-        emp_id: {
-            "status": "...",
-            "reason": "...",
-            "comment": "..."
-        }
-    }
-    """
     conn = connect()
     cur = conn.cursor()
 
@@ -274,45 +249,7 @@ def load_today_status(date: str) -> Dict[int, Dict[str, str]]:
     return result
 
 
-def get_attendance_rows(date_from: str, date_to: str):
-    """
-    Возвращает все записи attendance по активным реальным сотрудникам за период.
-    """
-    conn = connect()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT
-            a.emp_id,
-            a.date,
-            a.status,
-            COALESCE(a.reason, ''),
-            COALESCE(a.comment, '')
-        FROM attendance a
-        JOIN employees e ON e.id = a.emp_id
-        WHERE a.date BETWEEN ? AND ?
-          AND e.is_active = 1
-          AND UPPER(e.name) NOT LIKE 'ВАКАНТ%'
-        ORDER BY a.date, a.emp_id
-        """,
-        (date_from, date_to),
-    )
-    rows = cur.fetchall()
-
-    conn.close()
-    return rows
-
-
 def get_month_employee_stats(date_from: str, date_to: str):
-    """
-    Возвращает:
-    employees:
-        [(id, department, position, rank, name), ...]
-    attendance_rows:
-        [(emp_id, date, status, reason, comment), ...]
-    Только по активным реальным сотрудникам, без вакансий.
-    """
     conn = connect()
     cur = conn.cursor()
 
@@ -343,17 +280,3 @@ def get_month_employee_stats(date_from: str, date_to: str):
 
     conn.close()
     return employees, attendance_rows
-
-
-def employees_exist() -> bool:
-    """
-    Необязательная вспомогательная функция.
-    """
-    conn = connect()
-    cur = conn.cursor()
-
-    cur.execute("SELECT COUNT(*) FROM employees WHERE is_active = 1")
-    count = cur.fetchone()[0]
-
-    conn.close()
-    return count > 0
