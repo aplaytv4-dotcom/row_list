@@ -1,15 +1,6 @@
-attendance.db
 __pycache__/
 *.pyc
-
-# отчёты
-attendance_daily_*.docx
-attendance_period_*.docx
-
-# сборка
 build/
 dist/
-*.spec
-
-# служебные папки
-row_list/
+Отчеты/
+attendance_history.csv
