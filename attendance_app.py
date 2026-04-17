@@ -99,12 +99,24 @@ class AttendanceApp:
         headers_frame = ctk.CTkFrame(self.app)
         headers_frame.pack(fill="x", padx=10, pady=(10, 0))
 
+        column_widths = [50, 180, 140, 220, 130, 220, 220]
+        for col, width in enumerate(column_widths):
+            headers_frame.grid_columnconfigure(col, minsize=width)
+
         headers = ["№", "Должность", "Звание", "Ф.И.О", "Присутствует", "Причина отсутствия", "Примечание"]
         for col, text in enumerate(headers):
-            ctk.CTkLabel(headers_frame, text=text, font=("Arial", 14, "bold")).grid(row=0, column=col, padx=10, pady=5)
+            ctk.CTkLabel(
+                headers_frame,
+                text=text,
+                font=("Arial", 14, "bold"),
+                anchor="w",
+                justify="left"
+            ).grid(row=0, column=col, padx=10, pady=5, sticky="w")
 
         self.frame = ctk.CTkScrollableFrame(self.app)
         self.frame.pack(fill="both", expand=True, padx=10, pady=10)
+        for col, width in enumerate(column_widths):
+            self.frame.grid_columnconfigure(col, minsize=width)
 
         self.create_employee_rows()
         self.load_today_data()
