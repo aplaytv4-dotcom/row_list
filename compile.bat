@@ -5,12 +5,11 @@ echo =============================
 echo Компиляция AttendanceApp
 echo =============================
 
-rem Проверка наличия PyInstaller
 where pyinstaller >nul 2>&1
 if errorlevel 1 (
     echo.
     echo PyInstaller не найден.
-    echo Установите PyInstaller заранее в вашей офлайн-среде.
+    echo Установите PyInstaller заранее.
     echo Например: python -m pip install pyinstaller
     pause
     exit /b 1
@@ -27,6 +26,6 @@ if errorlevel 1 (
 
 echo.
 echo Компиляция завершена.
-echo Готовый exe находится в dist\attendance_app.exe
+echo Быстрый вариант exe находится в dist\attendance_app\attendance_app.exe
 pause
 endlocal
